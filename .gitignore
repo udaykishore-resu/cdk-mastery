@@ -1,0 +1,18 @@
+node_modules/
+dist/
+*.tsbuildinfo
+*.js.map
+# AWS CDK
+aws-cdk/cdk.out/
+# CDKTF
+cdktf-gcp/cdktf.out/
+cdktf-gcp/.gen/
+cdktf-gcp/terraform.*.tfstate*
+cdktf-gcp/.terraform/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+# tooling
+.DS_Store
+coverage/
+.env

@@ -1,0 +1,83 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Type-check every workspace
+        run: npm run build
+      - name: Test (shared, aws-cdk, cdktf-gcp)
+        run: npm test -- --ci
+        env:
+          CI: 'true'
+
+  synth-aws-cdk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Synthesize all 62 stacks (offline; AZ context is committed)
+        # Not --strict: modules 01 and 05 emit two *intentional* warnings that their READMEs discuss.
+        working-directory: aws-cdk
+        run: npx cdk synth --quiet
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aws-cdk-cloud-assembly
+          path: aws-cdk/cdk.out
+          retention-days: 7
+
+  synth-cdktf-gcp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.10.5'
+          terraform_wrapper: false
+      - run: npm ci
+      - name: Synthesize all stacks (incl. the moved/import stack, since a Terraform binary is present)
+        working-directory: cdktf-gcp
+        run: npx cdktf synth
+        env:
+          CDKM_ENABLE_REFACTOR_STACK: '1'
+      - name: terraform validate on every stack (advisory until its first green run — needs registry access)
+        working-directory: cdktf-gcp
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          for d in cdktf.out/stacks/*/; do
+            echo "== $d"
+            terraform -chdir="$d" init -backend=false -input=false >/dev/null
+            terraform -chdir="$d" validate -no-color
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cdktf-gcp-synth
+          path: cdktf-gcp/cdktf.out
+          retention-days: 7

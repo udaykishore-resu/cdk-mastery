@@ -1,0 +1,132 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`11 · snapshot of one small stack (messaging, prod) stabilised 1`] = `
+{
+  "data": {
+    "google_project": {
+      "Current": {
+        "project_id": "orders-demo",
+      },
+    },
+  },
+  "output": {
+    "DeadLetterSubscription": {
+      "value": "\${google_pubsub_subscription.OrdersDlqPull.name}",
+    },
+    "OrdersTopic": {
+      "value": "\${google_pubsub_topic.Orders.id}",
+    },
+    "cross-stack-output-google_pubsub_subscriptionOrdersDlqPullname": {
+      "sensitive": true,
+      "value": "\${google_pubsub_subscription.OrdersDlqPull.name}",
+    },
+    "cross-stack-output-google_pubsub_topicOrdersid": {
+      "sensitive": true,
+      "value": "\${google_pubsub_topic.Orders.id}",
+    },
+  },
+  "provider": {
+    "google": [
+      {
+        "project": "orders-demo",
+        "region": "us-central1",
+      },
+    ],
+  },
+  "resource": {
+    "google_pubsub_subscription": {
+      "OrdersDlqPull": {
+        "ack_deadline_seconds": 600,
+        "expiration_policy": {
+          "ttl": "",
+        },
+        "labels": {
+          "cost-center": "cc-platform-prod",
+          "environment": "prod",
+          "managed-by": "cdk-mastery",
+          "owner": "platform-oncall",
+          "service": "orders",
+        },
+        "message_retention_duration": "604800s",
+        "name": "cdkm-orders-prod-orders-dlq-pull",
+        "topic": "\${google_pubsub_topic.OrdersDlq.name}",
+      },
+      "OrdersPull": {
+        "ack_deadline_seconds": 60,
+        "dead_letter_policy": {
+          "dead_letter_topic": "\${google_pubsub_topic.OrdersDlq.id}",
+          "max_delivery_attempts": 5,
+        },
+        "expiration_policy": {
+          "ttl": "",
+        },
+        "labels": {
+          "cost-center": "cc-platform-prod",
+          "environment": "prod",
+          "managed-by": "cdk-mastery",
+          "owner": "platform-oncall",
+          "service": "orders",
+        },
+        "message_retention_duration": "604800s",
+        "name": "cdkm-orders-prod-orders-pull",
+        "retry_policy": {
+          "maximum_backoff": "600s",
+          "minimum_backoff": "10s",
+        },
+        "topic": "\${google_pubsub_topic.Orders.name}",
+      },
+    },
+    "google_pubsub_subscription_iam_member": {
+      "SourceSubscriber": {
+        "member": "serviceAccount:service-\${data.google_project.Current.number}@gcp-sa-pubsub.iam.gserviceaccount.com",
+        "role": "roles/pubsub.subscriber",
+        "subscription": "\${google_pubsub_subscription.OrdersPull.name}",
+      },
+    },
+    "google_pubsub_topic": {
+      "Orders": {
+        "labels": {
+          "cost-center": "cc-platform-prod",
+          "environment": "prod",
+          "managed-by": "cdk-mastery",
+          "owner": "platform-oncall",
+          "service": "orders",
+        },
+        "message_retention_duration": "604800s",
+        "name": "cdkm-orders-prod-orders",
+      },
+      "OrdersDlq": {
+        "labels": {
+          "cost-center": "cc-platform-prod",
+          "environment": "prod",
+          "managed-by": "cdk-mastery",
+          "owner": "platform-oncall",
+          "service": "orders",
+        },
+        "message_retention_duration": "604800s",
+        "name": "cdkm-orders-prod-orders-dlq",
+      },
+    },
+    "google_pubsub_topic_iam_member": {
+      "DlqPublisher": {
+        "member": "serviceAccount:service-\${data.google_project.Current.number}@gcp-sa-pubsub.iam.gserviceaccount.com",
+        "role": "roles/pubsub.publisher",
+        "topic": "\${google_pubsub_topic.OrdersDlq.name}",
+      },
+    },
+  },
+  "terraform": {
+    "backend": {
+      "local": {
+        "path": "<local-state>",
+      },
+    },
+    "required_providers": {
+      "google": {
+        "source": "google",
+        "version": "<version>",
+      },
+    },
+  },
+}
+`;

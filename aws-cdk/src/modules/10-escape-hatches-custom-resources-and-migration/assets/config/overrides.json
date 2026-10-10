@@ -1,0 +1,4 @@
+{
+  "featureFlags": { "newCheckout": true },
+  "limits": { "maxItemsPerOrder": 100 }
+}

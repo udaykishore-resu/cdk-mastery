@@ -1,0 +1,149 @@
+# Example GitHub Actions workflow for this repository's AWS CDK track.
+# Lives under the module folder on purpose: copy it to .github/workflows/ when you
+# adopt it. Pairs with GitHubOidcStack (github-oidc-stack.ts), whose DeployRoleArn
+# output is the value of `role-to-assume` below (store it as a repository variable).
+#
+# Two jobs:
+#   diff   — on pull_request: synth, `cdk diff` against the live stacks, post the
+#            diff as a PR comment. Read-only: the role only needs the lookup role,
+#            but `cdk diff` reads deployed templates through the deploy role's
+#            DescribeStacks, so the same deploy role is used here; exercise 3 splits them.
+#   deploy — on push to main: `cdk deploy --all --require-approval never`.
+#            Serialized by the concurrency group so two merges never race
+#            CloudFormation for the same stacks.
+name: cdk
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ['aws-cdk/**', 'shared/**', 'package-lock.json']
+  push:
+    branches: [main]
+    paths: ['aws-cdk/**', 'shared/**', 'package-lock.json']
+
+permissions:
+  id-token: write      # required to request the OIDC token
+  contents: read
+  pull-requests: write # to post the diff comment
+
+env:
+  AWS_REGION: us-east-1
+  CDK_DEFAULT_REGION: us-east-1
+  # Fail fast on warnings in the tree, and never prompt.
+  CI: 'true'
+
+jobs:
+  diff:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    # One diff at a time per PR; a newer push cancels the older run.
+    concurrency:
+      group: cdk-diff-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test -w aws-cdk -- --ci
+
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.CDK_DEPLOY_ROLE_ARN }}   # output DeployRoleArn of M08-GitHubOidc
+          role-session-name: gha-pr-${{ github.event.pull_request.number }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # `--strict` makes warnings fatal; synth once so diff can reuse cdk.out via --app.
+      - name: Synth
+        working-directory: aws-cdk
+        run: npx cdk synth --strict --quiet
+
+      # `--fail` exits 1 on any difference; we capture the exit code so the comment is
+      # posted either way, then re-raise so the check shows red when there is a diff
+      # that has not been acknowledged by a reviewer.
+      - name: Diff
+        id: diff
+        working-directory: aws-cdk
+        shell: bash
+        run: |
+          set +e
+          npx cdk diff --app cdk.out --all --fail --no-color > diff.txt 2>&1
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+          set -e
+          # Keep the comment under GitHub's 65k limit.
+          head -c 60000 diff.txt > diff-trimmed.txt
+
+      - name: Comment diff on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('aws-cdk/diff-trimmed.txt', 'utf8');
+            const exit = '${{ steps.diff.outputs.exit }}';
+            const header = exit === '0' ? '### cdk diff: no changes' : '### cdk diff: changes detected';
+            const marker = '<!-- cdk-diff -->';
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number,
+            });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            const text = `${marker}\n${header}\n\n<details><summary>output</summary>\n\n\`\`\`\n${body}\n\`\`\`\n</details>`;
+            if (existing) {
+              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body: text });
+            } else {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body: text });
+            }
+
+      - name: Fail if the diff shows security-impacting changes
+        working-directory: aws-cdk
+        run: npx cdk diff --app cdk.out --all --security-only --fail
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Never run two deploys of main concurrently; do NOT cancel the running one
+    # (a cancelled cdk deploy leaves CloudFormation mid-update).
+    concurrency:
+      group: cdk-deploy-main
+      cancel-in-progress: false
+    # A GitHub Environment with required reviewers is the GHA equivalent of
+    # ManualApprovalStep; its `sub` claim is repo:<o/r>:environment:prod.
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test -w aws-cdk -- --ci
+
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.CDK_DEPLOY_ROLE_ARN }}
+          role-session-name: gha-deploy-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Synth
+        working-directory: aws-cdk
+        run: npx cdk synth --strict --quiet
+
+      # --require-approval never: the approval already happened (PR review + the
+      # `prod` environment gate). Without it the CLI would block waiting for a TTY.
+      # --concurrency 4: deploy independent stacks in parallel.
+      - name: Deploy
+        working-directory: aws-cdk
+        run: npx cdk deploy --app cdk.out --all --require-approval never --concurrency 4 --progress events

@@ -1,0 +1,9 @@
+{
+  "language": "typescript",
+  "app": "npx ts-node --prefer-ts-exts src/main.ts",
+  "projectId": "cdk-mastery-gcp",
+  "sendCrashReports": "false",
+  "terraformProviders": [],
+  "terraformModules": [],
+  "context": {}
+}

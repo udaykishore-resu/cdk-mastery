@@ -1,0 +1,235 @@
+# Example GitHub Actions workflow for the CDKTF (GCP) track.
+#
+# Lives under the module folder on purpose; copy it to .github/workflows/ in a
+# real repository. It assumes:
+#   - `cdktf deploy m08-wif` was run once by a human (bootstrap), and its outputs
+#     were stored as repository *variables* (not secrets — they are not sensitive):
+#       vars.WORKLOAD_IDENTITY_PROVIDER  projects/123/locations/global/workloadIdentityPools/github/providers/github-actions
+#       vars.DEPLOYER_SERVICE_ACCOUNT    cdktf-deployer@<project>.iam.gserviceaccount.com
+#       vars.STATE_BUCKET                <bucket>
+#       vars.GCP_PROJECT                 <project>
+#   - the repository's Actions settings allow "Read and write" for the GITHUB_TOKEN
+#     on pull requests (needed to post the plan comment), or a fine-grained PAT.
+#
+# Deploy order is explicit (foundation -> network -> data -> messaging -> compute
+# -> observability) because cross-stack references only encode *data* dependencies;
+# `cdktf deploy a b c` deploys in dependency order but running the list
+# explicitly makes failures attributable and lets a job re-run one stack.
+
+name: cdktf
+
+on:
+  pull_request:
+    paths: ['cdktf-gcp/**', 'shared/**', '.github/workflows/cdktf-deploy.yml']
+  push:
+    branches: [main]
+    paths: ['cdktf-gcp/**', 'shared/**']
+  schedule:
+    - cron: '17 6 * * *' # daily drift detection, 06:17 UTC (off the hour: fewer contended runners)
+  workflow_dispatch:
+
+# One deploy at a time per environment. `cancel-in-progress: false` for deploys:
+# cancelling a half-applied Terraform run is worse than waiting.
+concurrency:
+  group: cdktf-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || 'main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  id-token: write # REQUIRED: lets the job request an OIDC token from GitHub
+  pull-requests: write # to post the plan as a comment
+
+env:
+  TF_IN_AUTOMATION: 'true'
+  TF_INPUT: '0'
+  CDKM_GCP_PROJECT: ${{ vars.GCP_PROJECT }}
+  CDKM_STATE_BUCKET: ${{ vars.STATE_BUCKET }}
+  CDKTF_DISABLE_LOGGING: 'true'
+  # Stacks in deploy order. Keep in sync with cdktf-gcp/src/main.ts.
+  STACKS: >-
+    m11-prod-foundation m11-prod-network m11-prod-data m11-prod-messaging m11-prod-compute m11-prod-observability
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Offline: type-check, unit tests, synth, policy. No credentials.
+  # ---------------------------------------------------------------------------
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace cdktf-gcp
+      - run: npm test --workspace cdktf-gcp
+      - name: synth
+        working-directory: cdktf-gcp
+        run: npx cdktf synth
+      - name: policy (conftest on the synthesized JSON)
+        uses: instrumenta/conftest-action@v0.3.0
+        with:
+          files: cdktf-gcp/cdktf.out/stacks/*/cdk.tf.json
+          policy: cdktf-gcp/src/modules/06-aspects-labels-and-governance/policy/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cdktf-out
+          path: cdktf-gcp/cdktf.out
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Pull requests: plan and post it as a comment. Read-only credentials suffice
+  # for `plan` if the planner SA has viewer roles (exercise 2); here we use the
+  # deployer for simplicity.
+  # ---------------------------------------------------------------------------
+  plan:
+    if: github.event_name == 'pull_request'
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.9.8'
+          terraform_wrapper: false # the wrapper breaks cdktf's parsing of terraform output
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SERVICE_ACCOUNT }}
+          # token_format: access_token  # only if a later step needs a raw token
+      - name: cdktf diff
+        id: diff
+        working-directory: cdktf-gcp
+        # `cdktf diff` = synth + terraform init + plan, one stack at a time.
+        # Capture the output; strip ANSI; keep the exit code honest.
+        run: |
+          set -o pipefail
+          {
+            for s in $STACKS; do
+              echo "### $s"
+              echo '```'
+              npx cdktf diff "$s" 2>&1 | sed -r 's/\x1B\[[0-9;]*[mK]//g' | tail -n +1
+              echo '```'
+            done
+          } | tee plan.txt
+      - name: post plan as PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('cdktf-gcp/plan.txt', 'utf8');
+            const marker = '<!-- cdktf-plan -->';
+            const truncated = body.length > 60000 ? body.slice(0, 60000) + '\n…(truncated; see job log)' : body;
+            const { data: comments } = await github.rest.issues.listComments({ ...context.repo, issue_number: context.issue.number });
+            const existing = comments.find(c => c.body && c.body.startsWith(marker));
+            const payload = { ...context.repo, body: `${marker}\n## cdktf plan\n${truncated}` };
+            if (existing) await github.rest.issues.updateComment({ ...payload, comment_id: existing.id });
+            else await github.rest.issues.createComment({ ...payload, issue_number: context.issue.number });
+
+  # ---------------------------------------------------------------------------
+  # main: deploy in order. `--auto-approve` is safe *only* because the PR run
+  # already showed the plan and nothing else can write to this state (concurrency
+  # group + the deployer is the only identity with objectAdmin on the bucket).
+  # `environment: prod` adds GitHub's required-reviewers gate for prod.
+  # ---------------------------------------------------------------------------
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.9.8'
+          terraform_wrapper: false
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SERVICE_ACCOUNT }}
+      - name: cdktf deploy (ordered)
+        working-directory: cdktf-gcp
+        run: |
+          for s in $STACKS; do
+            echo "::group::deploy $s"
+            npx cdktf deploy "$s" --auto-approve --ignore-missing-stack-dependencies
+            echo "::endgroup::"
+          done
+
+  # ---------------------------------------------------------------------------
+  # Drift detection: synth, then run terraform plan -detailed-exitcode inside
+  # each synthesized stack directory. Exit 0 = no changes, 1 = error, 2 = drift.
+  # Runs on the schedule only; opens/updates an issue when drift is found.
+  # ---------------------------------------------------------------------------
+  drift:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.9.8'
+          terraform_wrapper: false
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SERVICE_ACCOUNT }}
+      - name: synth
+        working-directory: cdktf-gcp
+        run: npx cdktf synth
+      - name: plan -detailed-exitcode per stack
+        id: drift
+        working-directory: cdktf-gcp
+        run: |
+          drifted=""
+          for s in $STACKS; do
+            dir="cdktf.out/stacks/$s"
+            terraform -chdir="$dir" init -input=false -no-color >/dev/null
+            set +e
+            terraform -chdir="$dir" plan -input=false -lock=false -detailed-exitcode -no-color -out=/dev/null > "plan-$s.txt" 2>&1
+            code=$?
+            set -e
+            case $code in
+              0) echo "$s: clean" ;;
+              2) echo "$s: DRIFT"; drifted="$drifted $s" ;;
+              *) echo "$s: plan failed"; cat "plan-$s.txt"; exit 1 ;;
+            esac
+          done
+          echo "drifted=${drifted# }" >> "$GITHUB_OUTPUT"
+      - name: open or update a drift issue
+        if: steps.drift.outputs.drifted != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const stacks = '${{ steps.drift.outputs.drifted }}'.split(' ');
+            const sections = stacks.map(s => `### ${s}\n\n\`\`\`\n${fs.readFileSync(`cdktf-gcp/plan-${s}.txt`, 'utf8').slice(0, 20000)}\n\`\`\``).join('\n');
+            const title = 'Infrastructure drift detected';
+            const { data: issues } = await github.rest.issues.listForRepo({ ...context.repo, state: 'open', labels: 'drift' });
+            const body = `Drift found by the scheduled plan on ${new Date().toISOString()}.\n\n${sections}`;
+            if (issues.length) await github.rest.issues.update({ ...context.repo, issue_number: issues[0].number, body });
+            else await github.rest.issues.create({ ...context.repo, title, body, labels: ['drift'] });
+      - name: fail the job so the schedule shows red
+        if: steps.drift.outputs.drifted != ''
+        run: exit 2

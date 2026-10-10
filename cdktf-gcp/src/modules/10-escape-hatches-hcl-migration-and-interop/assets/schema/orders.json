@@ -1,0 +1,5 @@
+[
+  { "name": "order_id", "type": "STRING", "mode": "REQUIRED" },
+  { "name": "amount_cents", "type": "INTEGER", "mode": "REQUIRED" },
+  { "name": "created_at", "type": "TIMESTAMP", "mode": "REQUIRED" }
+]

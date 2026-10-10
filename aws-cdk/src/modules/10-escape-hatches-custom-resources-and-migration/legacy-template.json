@@ -1,0 +1,96 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Legacy orders messaging stack, hand-written in 2019 and deployed ever since.",
+  "Parameters": {
+    "Environment": {
+      "Type": "String",
+      "AllowedValues": ["dev", "staging", "prod"],
+      "Default": "dev",
+      "Description": "Deployment environment"
+    },
+    "MessageRetentionSeconds": {
+      "Type": "Number",
+      "Default": 345600,
+      "MinValue": 60,
+      "MaxValue": 1209600
+    }
+  },
+  "Conditions": {
+    "IsProd": { "Fn::Equals": [{ "Ref": "Environment" }, "prod"] }
+  },
+  "Resources": {
+    "OrdersTopic": {
+      "Type": "AWS::SNS::Topic",
+      "Properties": {
+        "TopicName": { "Fn::Sub": "orders-events-${Environment}" },
+        "DisplayName": "Order events"
+      }
+    },
+    "OrdersQueue": {
+      "Type": "AWS::SQS::Queue",
+      "Properties": {
+        "QueueName": { "Fn::Sub": "orders-inbox-${Environment}" },
+        "MessageRetentionPeriod": { "Ref": "MessageRetentionSeconds" },
+        "VisibilityTimeout": 60,
+        "RedrivePolicy": {
+          "deadLetterTargetArn": { "Fn::GetAtt": ["OrdersDeadLetterQueue", "Arn"] },
+          "maxReceiveCount": 5
+        }
+      }
+    },
+    "OrdersDeadLetterQueue": {
+      "Type": "AWS::SQS::Queue",
+      "Properties": {
+        "QueueName": { "Fn::Sub": "orders-inbox-dlq-${Environment}" },
+        "MessageRetentionPeriod": 1209600
+      },
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain"
+    },
+    "OrdersQueuePolicy": {
+      "Type": "AWS::SQS::QueuePolicy",
+      "Properties": {
+        "Queues": [{ "Ref": "OrdersQueue" }],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "AllowTopicToSend",
+              "Effect": "Allow",
+              "Principal": { "Service": "sns.amazonaws.com" },
+              "Action": "sqs:SendMessage",
+              "Resource": { "Fn::GetAtt": ["OrdersQueue", "Arn"] },
+              "Condition": { "ArnEquals": { "aws:SourceArn": { "Ref": "OrdersTopic" } } }
+            }
+          ]
+        }
+      }
+    },
+    "OrdersSubscription": {
+      "Type": "AWS::SNS::Subscription",
+      "Properties": {
+        "TopicArn": { "Ref": "OrdersTopic" },
+        "Protocol": "sqs",
+        "Endpoint": { "Fn::GetAtt": ["OrdersQueue", "Arn"] },
+        "RawMessageDelivery": true
+      }
+    },
+    "OrdersAlarmTopic": {
+      "Type": "AWS::SNS::Topic",
+      "Condition": "IsProd",
+      "Properties": {
+        "TopicName": { "Fn::Sub": "orders-alarms-${Environment}" }
+      }
+    }
+  },
+  "Outputs": {
+    "QueueUrl": {
+      "Description": "URL of the orders inbox queue",
+      "Value": { "Ref": "OrdersQueue" },
+      "Export": { "Name": { "Fn::Sub": "orders-inbox-url-${Environment}" } }
+    },
+    "TopicArn": {
+      "Value": { "Ref": "OrdersTopic" }
+    }
+  }
+}

@@ -1,0 +1,239 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`addToApp snapshot: the Data stack is small enough to review by eye, so its template is pinned 1`] = `
+{
+  "Outputs": {
+    "PublishOutputFnGetAttDataKey17AFBB84Arn5D1EA6C9": {
+      "Value": {
+        "Fn::GetAtt": [
+          "DataKey17AFBB84",
+          "Arn",
+        ],
+      },
+    },
+    "TableName": {
+      "Value": {
+        "Ref": "OrdersA9B65338",
+      },
+    },
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+  },
+  "Resources": {
+    "DataKey17AFBB84": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "Description": "Orders prod: DynamoDB + SNS encryption key",
+        "EnableKeyRotation": true,
+        "KeyPolicy": {
+          "Statement": [
+            {
+              "Action": "kms:*",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": "arn:aws:iam::222222222222:root",
+              },
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "kms:Decrypt",
+                "kms:Encrypt",
+                "kms:GenerateDataKey*",
+                "kms:ReEncrypt*",
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": "222222222222",
+                },
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "events.amazonaws.com",
+              },
+              "Resource": "*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PendingWindowInDays": 30,
+        "Tags": [
+          {
+            "Key": "cost-center",
+            "Value": "cc-platform-prod",
+          },
+          {
+            "Key": "environment",
+            "Value": "prod",
+          },
+          {
+            "Key": "managed-by",
+            "Value": "cdk-mastery",
+          },
+          {
+            "Key": "owner",
+            "Value": "platform-oncall",
+          },
+          {
+            "Key": "service",
+            "Value": "orders",
+          },
+        ],
+      },
+      "Type": "AWS::KMS::Key",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "DataKeyAliasF989EB84": {
+      "Properties": {
+        "AliasName": "alias/revan-orders-prod-data",
+        "TargetKeyId": {
+          "Fn::GetAtt": [
+            "DataKey17AFBB84",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::KMS::Alias",
+    },
+    "OrdersA9B65338": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "pk",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "sk",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "customerId",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "createdAt",
+            "AttributeType": "S",
+          },
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+        "GlobalSecondaryIndexes": [
+          {
+            "IndexName": "ByCustomer",
+            "KeySchema": [
+              {
+                "AttributeName": "customerId",
+                "KeyType": "HASH",
+              },
+              {
+                "AttributeName": "createdAt",
+                "KeyType": "RANGE",
+              },
+            ],
+            "Projection": {
+              "ProjectionType": "ALL",
+            },
+          },
+        ],
+        "KeySchema": [
+          {
+            "AttributeName": "pk",
+            "KeyType": "HASH",
+          },
+          {
+            "AttributeName": "sk",
+            "KeyType": "RANGE",
+          },
+        ],
+        "Replicas": [
+          {
+            "DeletionProtectionEnabled": true,
+            "GlobalSecondaryIndexes": [
+              {
+                "IndexName": "ByCustomer",
+              },
+            ],
+            "PointInTimeRecoverySpecification": {
+              "PointInTimeRecoveryEnabled": true,
+            },
+            "Region": "us-west-2",
+            "SSESpecification": {
+              "KMSMasterKeyId": {
+                "Fn::GetAtt": [
+                  "DataKey17AFBB84",
+                  "Arn",
+                ],
+              },
+            },
+            "Tags": [
+              {
+                "Key": "cost-center",
+                "Value": "cc-platform-prod",
+              },
+              {
+                "Key": "environment",
+                "Value": "prod",
+              },
+              {
+                "Key": "managed-by",
+                "Value": "cdk-mastery",
+              },
+              {
+                "Key": "owner",
+                "Value": "platform-oncall",
+              },
+              {
+                "Key": "service",
+                "Value": "orders",
+              },
+            ],
+          },
+        ],
+        "SSESpecification": {
+          "SSEEnabled": true,
+          "SSEType": "KMS",
+        },
+        "TableName": "revan-orders-prod-orders",
+        "TimeToLiveSpecification": {
+          "AttributeName": "expiresAt",
+          "Enabled": true,
+        },
+      },
+      "Type": "AWS::DynamoDB::GlobalTable",
+      "UpdateReplacePolicy": "Retain",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;

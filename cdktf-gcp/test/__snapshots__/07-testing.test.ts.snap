@@ -1,0 +1,139 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`07 · rung 3: snapshots (only where the README argues for them) stabilised snapshot of the whole stack: asset hash, backend path and provider version neutralised 1`] = `
+{
+  "data": {
+    "google_project": {
+      "Current": {
+        "project_id": "demo",
+      },
+    },
+  },
+  "output": {
+    "ProjectNumber": {
+      "sensitive": true,
+      "value": "\${data.google_project.Current.number}",
+    },
+    "TopicName": {
+      "value": "\${google_pubsub_topic.Orders.name}",
+    },
+  },
+  "provider": {
+    "google": [
+      {
+        "project": "demo",
+        "region": "us-central1",
+      },
+    ],
+  },
+  "resource": {
+    "google_pubsub_subscription": {
+      "OrdersSub": {
+        "ack_deadline_seconds": 30,
+        "dead_letter_policy": {
+          "dead_letter_topic": "\${google_pubsub_topic.DeadLetter.id}",
+          "max_delivery_attempts": "\${var.max_delivery_attempts}",
+        },
+        "depends_on": [
+          "google_service_account.Worker",
+        ],
+        "labels": {
+          "cost-center": "cc-platform-prod",
+          "environment": "prod",
+          "managed-by": "cdk-mastery",
+          "owner": "platform-oncall",
+          "service": "testable",
+        },
+        "name": "cdkm-testable-prod-orders-sub",
+        "topic": "\${google_pubsub_topic.Orders.name}",
+      },
+    },
+    "google_pubsub_topic": {
+      "DeadLetter": {
+        "labels": {
+          "cost-center": "cc-platform-prod",
+          "environment": "prod",
+          "managed-by": "cdk-mastery",
+          "owner": "platform-oncall",
+          "service": "testable",
+        },
+        "name": "cdkm-testable-prod-dlq",
+      },
+      "Orders": {
+        "labels": {
+          "cost-center": "cc-platform-prod",
+          "environment": "prod",
+          "managed-by": "cdk-mastery",
+          "owner": "platform-oncall",
+          "service": "testable",
+        },
+        "lifecycle": {
+          "ignore_changes": [
+            "labels",
+          ],
+        },
+        "message_retention_duration": "604800s",
+        "name": "cdkm-testable-prod-orders",
+      },
+    },
+    "google_service_account": {
+      "Worker": {
+        "account_id": "cdkm-testable-prod-worker",
+        "display_name": "Testable worker",
+      },
+    },
+    "google_storage_bucket": {
+      "Artifacts_Bucket_ADA78AEC": {
+        "labels": {
+          "cost-center": "cc-platform-prod",
+          "environment": "prod",
+          "managed-by": "cdk-mastery",
+          "owner": "platform-oncall",
+          "service": "testable",
+        },
+        "location": "US-CENTRAL1",
+        "name": "cdkm-testable-prod-artifacts",
+        "public_access_prevention": "enforced",
+        "uniform_bucket_level_access": true,
+        "versioning": {
+          "enabled": true,
+        },
+      },
+    },
+    "google_storage_bucket_iam_member": {
+      "Artifacts_Reader0_2D7AEB24": {
+        "bucket": "\${google_storage_bucket.Artifacts_Bucket_ADA78AEC.name}",
+        "member": "\${google_service_account.Worker.member}",
+        "role": "roles/storage.objectViewer",
+      },
+    },
+    "google_storage_bucket_object": {
+      "ConfigObject": {
+        "bucket": "\${google_storage_bucket.Artifacts_Bucket_ADA78AEC.name}",
+        "name": "config/archive.zip",
+        "source": "assets/ConfigAsset/<hash>/archive.zip",
+      },
+    },
+  },
+  "terraform": {
+    "backend": {
+      "local": {
+        "path": "<local-state>",
+      },
+    },
+    "required_providers": {
+      "google": {
+        "source": "google",
+        "version": "<version>",
+      },
+    },
+  },
+  "variable": {
+    "max_delivery_attempts": {
+      "default": 5,
+      "description": "Deliveries before a message is dead-lettered",
+      "type": "number",
+    },
+  },
+}
+`;

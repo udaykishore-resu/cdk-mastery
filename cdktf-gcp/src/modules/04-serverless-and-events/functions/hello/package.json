@@ -1,0 +1,12 @@
+{
+  "name": "cdk-mastery-order-processor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tiny Cloud Functions gen2 handler: decodes a Pub/Sub CloudEvent and appends a row to BigQuery.",
+  "main": "index.js",
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@google-cloud/functions-framework": "^3.4.0",
+    "@google-cloud/bigquery": "^7.9.0"
+  }
+}

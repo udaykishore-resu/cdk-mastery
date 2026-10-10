@@ -1,0 +1,24 @@
+{
+  "name": "@cdk-mastery/cdktf-gcp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CDK for Terraform (GCP) track — 12 modules from the first bucket to an org-scale capstone.",
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
+    "test": "jest",
+    "synth": "cdktf synth",
+    "ls": "cdktf list",
+    "cdktf": "cdktf"
+  },
+  "dependencies": {
+    "@cdk-mastery/shared": "*",
+    "@cdktf/provider-google": "^16.12.1",
+    "@cdktf/provider-google-beta": "^16.12.1",
+    "@cdktf/provider-random": "^12.0.1",
+    "cdktf": "^0.21.0",
+    "constructs": "^10.8.1"
+  },
+  "devDependencies": {
+    "cdktf-cli": "^0.21.0"
+  }
+}

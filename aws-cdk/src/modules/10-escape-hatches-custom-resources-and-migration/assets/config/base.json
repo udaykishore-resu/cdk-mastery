@@ -1,0 +1,5 @@
+{
+  "service": "orders",
+  "featureFlags": { "newCheckout": false, "asyncInvoicing": true },
+  "limits": { "maxItemsPerOrder": 50 }
+}
